@@ -36,7 +36,7 @@ Below are the mutation operators available in the current version of WAF-A-MoLE.
 | Logical Invariant | `admin' OR 1=1#` ⇒ `admin' OR 1=1 AND 0<1#`|
 | Number Shuffling | `admin' OR 1=1#` ⇒ `admin' OR 2=2#`|
 | ASCII Encoding | `admin' OR 35<107#` ⇒ `admin' OR ASCII('#')<ASCII('k')#`|
-| Bitwise OR | `admin’ OR 3<9# ⇒ admin’ OR (2|1)<9)#`|
+| Bitwise OR | `admin’ OR 3<9# ⇒ admin’ OR (2\|1)<9)#`|
 | Bitwise AND | `admin’ OR 3<9# ⇒ admin’ OR (3&7)<9)#`|
 | Bitwise XOR | `admin’ OR 3<9# ⇒ admin’ OR (5^6)<9)#`|
 | Bitwise negation | `admin’ OR 3<9# ⇒ admin’ OR ~(-4)<9)#`|
