@@ -1,4 +1,4 @@
-# WAF-A-MoLE
+# adversqli - some changes for WAF-A-MoLE
 
 A *guided mutation-based fuzzer* for ML-based Web Application Firewalls, inspired by AFL and based on the [FuzzingBook](https://www.fuzzingbook.org) by Andreas Zeller et al.
 
