@@ -1,8 +1,27 @@
-"""Strategies and fuzzer class module"""
+"""
+Strategies and fuzzer class module. 
+
+MySQL syntax only. MySQL supports comments with:
+1) # with comment text while endline;
+2) -- with comment text while endline;
+2) /* <comment text> */ allwhere.
+
+Examples:
+mysql> SELECT 1+1;     # Этот комментарий продолжается до конца строки
+mysql> SELECT 1+1;     -- Этот комментарий продолжается до конца строки
+mysql> SELECT 1 /* Это комментарий в строке */ + 1;
+mysql> SELECT 1+
+/*
+Это многострочный
+комментарий
+*/
+1;
+
+"""
 
 import random
 import re
-import string
+import sqlparse
 from wafamole.payloadfuzzer.fuzz_utils import (
     replace_random,
     filter_candidates,
@@ -11,13 +30,16 @@ from wafamole.payloadfuzzer.fuzz_utils import (
     string_tautology,
     num_contradiction,
     string_contradiction,
+    trailing_zeros
 )
 
 
 def reset_inline_comments(payload: str):
-    """Remove randomly chosen multi-line comment content.
+    """
+    Removes a randomly chosen multi-line comment content.
+
     Arguments:
-        payload: query payload string
+        payload: query payload (string)
 
     Returns:
         str: payload modified
@@ -38,24 +60,31 @@ def reset_inline_comments(payload: str):
     return new_payload
 
 
-def logical_invariant(payload):
-    """logical_invariant
-
-    Adds an invariant boolean condition to the payload
-
-    E.g., something OR False
-
-
-    :param payload:
+def logical_invariant(payload: str):
     """
+    Adds an invariant boolean condition to the payload.
 
-    pos = re.search("(#|-- )", payload)
+    E.g., expression OR False
+    where expression is a numeric or string tautology such as 1=1 or 'x'<>'y'
 
-    if not pos:
-        # No comments found
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    # rule matching numeric tautologies
+    num_tautologies_pos = list(re.finditer(r'\b(\d+)(\s*=\s*|\s+(?i:like)\s+)\1\b', payload))
+    num_tautologies_neg = list(re.finditer(r'\b(\d+)(\s*(!=|<>)\s*|\s+(?i:not like)\s+)(?!\1\b)\d+\b', payload))
+    # rule matching string tautologies
+    string_tautologies_pos = list(re.finditer(r'(\'|\")([a-zA-Z]{1}[\w#@$]*)\1(\s*=\s*|\s+(?i:like)\s+)(\'|\")\2\4', payload))
+    string_tautologies_neg = list(re.finditer(r'(\'|\")([a-zA-Z]{1}[\w#@$]*)\1(\s*(!=|<>)\s*|\s+(?i:not like)\s+)(\'|\")(?!\2)([a-zA-Z]{1}[\w#@$]*)\5', payload))
+    results = num_tautologies_pos + num_tautologies_neg + string_tautologies_pos + string_tautologies_neg
+    if not results:
         return payload
+    candidate = random.choice(results)
 
-    pos = pos.start()
+    pos = candidate.end()
 
     replacement = random.choice(
         [
@@ -77,16 +106,32 @@ def logical_invariant(payload):
     return new_payload
 
 
-def change_tautologies(payload):
+def change_tautologies(payload: str):
+    """
+    Replaces a randomly chosen numeric/string tautology with another one.
 
-    results = list(re.finditer(r'((?<=[^\'"\d\wx])\d+(?=[^\'"\d\wx]))=\1', payload))
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    # rules matching numeric tautologies
+    num_tautologies_pos = list(re.finditer(r'\b(\d+)(\s*=\s*|\s+(?i:like)\s+)\1\b', payload))
+    num_tautologies_neg = list(re.finditer(r'\b(\d+)(\s*(!=|<>)\s*|\s+(?i:not like)\s+)(?!\1\b)\d+\b', payload))
+    # rule matching string tautologies
+    string_tautologies_pos = list(re.finditer(r'(\'|\")([a-zA-Z]{1}[\w#@$]*)\1(\s*=\s*|\s+(?i:like)\s+)(\'|\")\2\4', payload))
+    string_tautologies_neg = list(re.finditer(r'(\'|\")([a-zA-Z]{1}[\w#@$]*)\1(\s*(!=|<>)\s*|\s+(?i:not like)\s+)(\'|\")(?!\2)([a-zA-Z]{1}[\w#@$]*)\5', payload))
+    results = num_tautologies_pos + num_tautologies_neg + string_tautologies_pos + string_tautologies_neg
     if not results:
         return payload
     candidate = random.choice(results)
 
-    replacements = [num_tautology(), string_tautology()]
-
-    replacement = random.choice(replacements)
+    while True:
+        replacements = [num_tautology(), string_tautology()]
+        replacement = random.choice(replacements)
+        if candidate != replacement:
+            break
 
     new_payload = (
         payload[: candidate.span()[0]] + replacement + payload[candidate.span()[1] :]
@@ -95,7 +140,16 @@ def change_tautologies(payload):
     return new_payload
 
 
-def spaces_to_comments(payload):
+def spaces_to_comments(payload: str):
+    """
+    Replaces a randomly chosen space character with a multi-line comment (and vice-versa).
+
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
     # TODO: make it selectable (can be mixed with other strategies)
     symbols = {" ": ["/**/"], "/**/": [" "]}
 
@@ -112,18 +166,45 @@ def spaces_to_comments(payload):
     candidate_replacement = random.choice(replacements)
 
     # Apply mutation at one random occurrence in the payload
-    return replace_random(payload, candidate_symbol, candidate_replacement)
+    return replace_random(payload, re.escape(candidate_symbol), candidate_replacement)
 
 
-def spaces_to_whitespaces_alternatives(payload):
+def spaces_to_whitespaces_alternatives(payload: str):
+    """
+    Replaces a randomly chosen whitespace character with another one.
 
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    # Renewed symbols to substitute space
     symbols = {
-        " ": ["\t", "\n", "\f", "\v", "\xa0"],
-        "\t": [" ", "\n", "\f", "\v", "\xa0"],
-        "\n": ["\t", " ", "\f", "\v", "\xa0"],
-        "\f": ["\t", "\n", " ", "\v", "\xa0"],
-        "\v": ["\t", "\n", "\f", " ", "\xa0"],
-        "\xa0": ["\t", "\n", "\f", "\v", " "],
+        # Space replacements
+        " ": [
+            "\t", "\n", "\f", "\v", "\xa0",
+        ],
+        # Tab replacements
+        "\t": [
+            " ", "\n", "\f", "\v", "\xa0",
+        ],
+        # Newline replacements
+        "\n": [
+            " ", "\t", "\f", "\v", "\xa0",
+        ],
+        # Form feed replacements
+        "\f": [
+            " ", "\t", "\n", "\v", "\xa0",
+        ],
+        # Vertical tab replacements
+        "\v": [
+            " ", "\t", "\n", "\f", "\xa0",
+        ],
+        # Non-breaking space replacements
+        "\xa0": [
+            " ", "\t", "\n", "\f", "\v",
+        ]
     }
 
     symbols_in_payload = filter_candidates(symbols, payload)
@@ -139,35 +220,75 @@ def spaces_to_whitespaces_alternatives(payload):
     candidate_replacement = random.choice(replacements)
 
     # Apply mutation at one random occurrence in the payload
-    return replace_random(payload, candidate_symbol, candidate_replacement)
+    return replace_random(payload, re.escape(candidate_symbol), candidate_replacement)
 
 
-def random_case(payload):
+def random_case(payload: str):
+    """
+    Randomly changes the capitalization of the SQL keywords in the input payload.
+
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    tokens = []
+    # Check if the payload is correctly parsed (safety check).
+    try:
+        parsed_payload = sqlparse.parse(payload)
+    except Exception:
+        # Just return the input payload if it cannot be parsed to avoid stopping the fuzzing
+        return payload
+    for t in parsed_payload:
+        tokens.extend(list(t.flatten()))
+
+    sql_keywords = set(sqlparse.keywords.KEYWORDS_COMMON.keys())
+    # sql_keywords = ' '.join(list(sqlparse.keywords.KEYWORDS_COMMON..keys()) + list(sqlparse.keywords.KEYWORDS.keys()))
+
+    # Make sure case swapping is applied only to SQL tokens
     new_payload = []
-
-    for c in payload:
-        if random.random() > 0.5:
-            c = c.swapcase()
-        new_payload.append(c)
+    for token in tokens:
+        if token.value.upper() in sql_keywords:
+            new_token = ''.join([c.swapcase() if random.random() > 0.5 else c for c in token.value])
+            new_payload.append(new_token)
+        else:
+            new_payload.append(token.value)
 
     return "".join(new_payload)
 
 
-def comment_rewriting(payload):
+def comment_rewriting(payload: str):
+    """
+    Changes the content of a randomly chosen in-line or multi-line comment.
+    
+    Arguments:
+        payload: query payload (string)
 
+    Returns:
+        str: payload modified
+    """
     p = random.random()
 
     if p < 0.5 and ("#" in payload or "-- " in payload):
         return payload + random_string(2)
-    elif p >= 0.5 and ("*/" in payload):
-        return replace_random(payload, "*/", random_string() + "*/")
+    elif p >= 0.5 and re.search(r"/\*[^(/\*|\*/)]*\*/", payload):
+        return replace_random(payload, r"/\*[^(/\*|\*/)]*\*/", "/*" + random_string() + "*/")
     else:
         return payload
 
 
-def swap_int_repr(payload):
+def swap_int_repr(payload: str):
+    """
+    Changes the representation of a randomly chosen numerical constant with an equivalent one.
 
-    candidates = list(re.finditer(r'(?<=[^\'"\d\wx])\d+(?=[^\'"\d\wx])', payload))
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    candidates = list(re.finditer(r'\b\d+\b', payload))
 
     if not candidates:
         return payload
@@ -179,7 +300,11 @@ def swap_int_repr(payload):
     replacements = [
         hex(int(candidate)),
         "(SELECT {})".format(candidate),
+        # Removed by author
         # "({})".format(candidate),
+        # "OCT({})".format(int(candidate)),
+        # "HEX({})".format(int(candidate)),
+        # "BIN({})".format(int(candidate))
     ]
 
     replacement = random.choice(replacements)
@@ -187,97 +312,346 @@ def swap_int_repr(payload):
     return payload[: candidate_pos[0]] + replacement + payload[candidate_pos[1] :]
 
 
-def swap_keywords(payload):
+def swap_keywords(payload: str):
+    """
+    Replaces a randomly chosen SQL operator with a semantically equivalent one.
 
-    symbols = {
+    Arguments:
+        payload: query payload (string)
+
+    Returns:
+        str: payload modified
+    """
+    replacements = {
         # OR
-        "||": [" OR ", " || "],
-        " || ": [" OR ", "||"],
-        "OR": [" OR ", "||"],
-        "  OR  ": [" OR ", "||", " || "],
+        "||": [" OR ", " or "],
+        "OR": ["||", "or"],
+        "or": ["OR", "||"],
         # AND
-        "&&": [" AND ", " && "],
-        " && ": ["AND", " AND ", " && "],
-        "AND": [" AND ", "&&", " && "],
-        "  AND  ": [" AND ", "&&"],
+        "&&": [" AND ", " and "],
+        "AND": ["&&", "and"],
+        "and": ["AND", "&&"],
         # Not equals
-        "<>": ["!=", " NOT LIKE "],
-        "!=": [" != ", "<>", " <> ", " NOT LIKE "],
+        "<>": ["!=", " NOT LIKE ", " not like "],
+        "!=": ["<>", " NOT LIKE ", " not like "],
+        "NOT LIKE": ["not like"],
+        "not like": ["NOT LIKE"],
         # Equals
-        " = ": [" LIKE ", "="],
-        "LIKE": [" LIKE ", "="],
+        "=": [" LIKE ", " like "],
+        "LIKE": ["like"],
+        "like": ["LIKE"]
     }
 
-    symbols_in_payload = filter_candidates(symbols, payload)
+    # Use sqlparse to tokenize the payload in order to better match keywords,
+    # even when they are composed by multiple keywords such as "NOT LIKE"
+    tokens = []
+    # Check if the payload is correctly parsed (safety check).
+    try:
+        parsed_payload = sqlparse.parse(payload)
+    except Exception:
+        # Just return the input payload if it cannot be parsed to avoid stopping the fuzzing
+        return payload
+    for t in parsed_payload:
+        tokens.extend(list(t.flatten()))
 
-    if not symbols_in_payload:
+    indices = [idx for idx, token in enumerate(tokens) if token.value in replacements]
+    if not indices:
         return payload
 
-    # Randomly choose symbol
-    candidate_symbol = random.choice(symbols_in_payload)
-    # Check for possible replacements
-    replacements = symbols[candidate_symbol]
-    # Choose one replacement randomly
-    candidate_replacement = random.choice(replacements)
+    target_idx = random.choice(indices)
+    new_payload = "".join([random.choice(replacements[token.value]) if idx == target_idx else token.value for idx, token in enumerate(tokens)])
 
-    # Apply mutation at one random occurrence in the payload
-    return replace_random(payload, candidate_symbol, candidate_replacement)
+    return new_payload
 
-def shuffle_integers(payload):
-    """shuffle_integers
-
-    Replace number=number or number LIKE number cases with a digit + letter combination of the number's size
-
-    e.g. SELECT admins FROM (SELECT * FROM user WHERE 1782 LIKE 1782) WHERE 999=122
-    could become SELECT admins FROM (SELECT * FROM user WHERE a1H9 LIKE a1H9) WHERE 999=122
-
-    :param payload:
+"""
+NEW FUNCTIONS BELOW
+"""
+def apply_int_to_ascii(payload: str) -> str:
     """
+    Заменяет одно случайное целое число (0-127) в SQL-пейлоуде на вызов ASCII('символ').
 
-    candidates = list(re.finditer(r'[0-9]+', payload))
+    Arguments:
+        payload (str): SQL-инъекционный пейлоуд
 
-    if not candidates:
+    Returns:
+        str: изменённый пейлоуд
+    """
+    # Находим все int числа, фильтруем только те,
+    # которые соответствуют ASCII-коду
+    # и не являются управляемыми (кроме \t и \n)
+    candidates = list(re.finditer(r'\b([0-9]{1,3})\b', payload))
+
+    valid = []
+    for m in candidates:
+        num = int(m.group(1))
+        if num == 9:
+            char = '\\t'
+        elif num == 10:
+            char = '\\n'
+        elif 32 <= num <= 126:
+            char = chr(num)
+        else:
+            continue
+        valid.append((m, char))
+
+    if not valid:
         return payload
 
-    possible_equal_pairs = []
-    for i in range(len(candidates)):
-        candidate_pos = candidates[i].span()
-        # Don't test for = or LIKE in last candidate for out of bounds index
-        if (i == len(candidates) - 1):
-            continue
-        elif (payload[candidate_pos[1]] == '=' 
-            or payload[candidate_pos[1]+1:candidate_pos[1]+5] == 'LIKE' ):
-            candidate_pair = [candidates[i].span(), candidates[i+1].span()]
-            possible_equal_pairs.append(candidate_pair)
+    chosen_match, char = random.choice(valid)
+    replacement = f"ASCII('{char}')"
 
-    definite_equal_pairs = []
-    for pair in possible_equal_pairs:
-        first_candidate_pos = pair[0]
-        second_candidate_pos = pair[1]
+    start, end = chosen_match.span()
+    new_payload = payload[:start] + replacement + payload[end:]
+    return new_payload
 
-        # Verify that an equal pair of numbers exist
-        if (payload[first_candidate_pos[0]:first_candidate_pos[1]] 
-            == payload[second_candidate_pos[0]:second_candidate_pos[1]]):
-            definite_equal_pairs.append(pair)
 
-    # Nothing gets replaced if no equal pairs are confirmed
-    if (len(definite_equal_pairs) < 1 or not definite_equal_pairs):
-        return payload 
+def apply_bitwise_or_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовым OR,
+    корректно разбивая число на две части по битовой маске.
+    Например: 6  -> 2 | 4
+              5  -> 1 | 4
+              1  -> 1 | 0  (единственный установленный бит)
+    """
+    # Находим все целые числовые литералы
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
 
-    pair_to_replace = random.choice(definite_equal_pairs)
+    # Выбираем случайную постоянку
+    sel = random.choice(matches)
+    orig = int(sel.group())
+    start, end = sel.span()
 
-    # Build a digit/letter replacement with the size of the paired numbers
-    single_replacements = list(string.ascii_letters) + list(range(0,10))
-    replacement_size = pair_to_replace[0][1] - pair_to_replace[0][0]
-    replacement = ''
-    for i in range(replacement_size):
-        replacement_unit = str(random.choice(single_replacements))    
-        replacement += replacement_unit
+    if orig == 0:
+        replacement = "(0 | 0)"
+    else:
+        # Собираем список битов, включённых в orig
+        bits = [1 << i for i in range(orig.bit_length()) if orig & (1 << i)]
+        # Если в числе только один бит, можно разбить как этот бит | 0
+        if len(bits) == 1:
+            replacement = f"({orig} | 0)"
+        else:
+            # Формируем случайную маску: выбираем произвольный непустой поднабор битов, но не весь набор
+            subset = set()
+            while not subset or subset == set(bits):
+                # каждый бит с вероятностью 0.5 включаем в subset
+                subset = {b for b in bits if random.random() < 0.5}
+            # первая часть — сумма битов из subset, вторая — оставшиеся биты
+            part1 = sum(subset)
+            part2 = orig & ~part1
+            replacement = f"({part1} | {part2})"
 
-    for candidate_pos in pair_to_replace:
-        payload = payload[:candidate_pos[0]] + replacement + payload[candidate_pos[1]:]
+    # Собираем новый payload
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_bitwise_and_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовым AND.
+    Например: 6 -> 7 & 6
+    """
+    # Находим все целые числовые литералы
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
+
+    # Выбираем случайный литерал
+    sel = random.choice(matches)
+    orig = int(sel.group())
+    start, end = sel.span()
+
+    if orig == 0:
+        # Для 0: 0 & любое_число = 0
+        replacement = "(0 & 0)"
+    else:
+        # Генерируем маску, содержащую все биты оригинала и, возможно, дополнительные
+        mask = orig
+        for i in range(orig.bit_length()):
+            if not (orig & (1 << i)) and random.random() < 0.5:
+                mask |= (1 << i)
+        replacement = f"({mask} & {orig})"
+
+    # Собираем новый payload
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_bitwise_xor_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовым XOR.
+    Например: 6 -> 3 ^ 5
+    """
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
+
+    sel = random.choice(matches)
+    orig = int(sel.group())
+    start, end = sel.span()
+
+    if orig == 0:
+        replacement = "(0 ^ 0)"
+    else:
+        attempts = 0
+        while attempts < 10:
+            part1 = random.randint(1, orig * 2)
+            part2 = orig ^ part1
+            if part2 >= 0:
+                break
+            attempts += 1
+        else:
+            return payload
+        replacement = f"({part1} ^ {part2})"
+
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_bitwise_negation_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовой инверсией.
+    Например: 5 -> ~(-6)
+    """
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
+
+    sel = random.choice(matches)
+    orig = int(sel.group())
+    start, end = sel.span()
+
+    replacement = f"(~(-{orig + 1}))"
+
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_redundant_keyword_omission(payload: str):
+    """
+    Работает только в простых случаях: 'SELECT col AS alias' → 'SELECT col alias'
+
+    Args:
+        payload (str): SQL-запрос
+
+    Returns:
+        str: модифицированный запрос
+    """
+    pattern = r'\b(\w+)\s+AS\s+(\w+)\b'
+    replaced = re.sub(pattern, r'\1 \2', payload, flags=re.IGNORECASE)
+    return replaced
+
+
+def apply_left_shift_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовым сдвигом влево.
+    Например: 6 -> 3 << 1
+    """
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
+
+    valid_matches = []
+    for match in matches:
+        num = int(match.group())
+        if num == 0:
+            valid_matches.append(match)
+        else:
+            tz = trailing_zeros(num)
+            if tz >= 1:
+                valid_matches.append(match)
     
-    return payload
+    if not valid_matches:
+        return payload
+    
+    sel = random.choice(valid_matches)
+    orig = int(sel.group())
+    start, end = sel.span()
+
+    if orig == 0:
+        # Выбираем случайный сдвиг для нуля
+        shift = random.randint(0, 10)
+        replacement = f"(0 << {shift})"
+    else:
+        tz = trailing_zeros(orig)
+        max_shift = tz
+        shift = random.randint(1, max_shift)
+        part1 = orig >> shift
+        replacement = f"({part1} << {shift})"
+
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_right_shift_mutation(payload: str) -> str:
+    """
+    Заменяет один случайный числовой литерал в SQL-запросе на выражение с побитовым сдвигом вправо.
+    Например: 6 -> 12 >> 1
+    """
+    matches = list(re.finditer(r'\b\d+\b', payload))
+    if not matches:
+        return payload
+
+    sel = random.choice(matches)
+    orig = int(sel.group())
+    start, end = sel.span()
+
+    if orig == 0:
+        # Случайный сдвиг для нуля (0 >> shift всегда 0)
+        shift = random.randint(0, 10)
+        replacement = f"(0 >> {shift})"
+    else:
+        # Любой сдвиг >= 1, но ограничим диапазон для умеренности
+        shift = random.randint(1, 8)
+        part1 = orig << shift
+        replacement = f"({part1} >> {shift})"
+
+    return payload[:start] + replacement + payload[end:]
+
+
+def apply_no_spaces_parentheses_mutation(payload: str) -> str:
+    """
+    Оборачивает в скобки аргумент любого SQL-оператора, исключая комментарии.
+    """
+    SQL_KEYWORDS = [
+        "SELECT", "FROM", "WHERE",
+        # "INSERT", "INTO", "VALUES",
+        # "UPDATE", "SET", "DELETE", "JOIN", "ON",
+        # "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "UNION"
+    ]
+
+    # Регулярное выражение: оператор + аргумент
+    OPERATOR_RE = re.compile(
+        r'(?i)\b(' + '|'.join(SQL_KEYWORDS) + r')\s+'
+        r"(('[^']*'|\"[^\"]*\"|[^\s,;()]+))"
+    )
+
+    # Регулярки для комментариев
+    LINE_COMMENT_RE = re.compile(r'(--[^\n]*|#[^\n]*)(?=\n|$)')
+    BLOCK_COMMENT_RE = re.compile(r'/\*.*?\*/', re.DOTALL)
+
+    FORBIDDEN_ARGS = {'*'}
+
+    # Сначала сохраняем позиции комментариев
+    comment_spans = []
+
+    for match in LINE_COMMENT_RE.finditer(payload):
+        comment_spans.append((match.start(), match.end()))
+    for match in BLOCK_COMMENT_RE.finditer(payload):
+        comment_spans.append((match.start(), match.end()))
+
+    def in_comment(pos: int) -> bool:
+        return any(start <= pos < end for start, end in comment_spans)
+
+    def replacer(match: re.Match) -> str:
+        if in_comment(match.start()):
+            return match.group(0)  # Не трогаем, если в комментарии
+
+        keyword = match.group(1)
+        arg = match.group(2)
+
+        if arg.strip().upper() in FORBIDDEN_ARGS:
+            return f"{keyword} {arg}"
+
+        return f"{keyword}({arg})"
+
+    return OPERATOR_RE.sub(replacer, payload)
 
 
 class SqlFuzzer(object):
@@ -293,7 +667,17 @@ class SqlFuzzer(object):
         change_tautologies,
         logical_invariant,
         reset_inline_comments,
-        shuffle_integers,
+        # New methods
+        # apply_mo_chr,
+        apply_int_to_ascii,
+        apply_bitwise_or_mutation,
+        apply_bitwise_and_mutation,
+        apply_bitwise_xor_mutation,
+        apply_bitwise_negation_mutation,
+        apply_left_shift_mutation,
+        apply_right_shift_mutation,
+        apply_redundant_keyword_omission,
+        apply_no_spaces_parentheses_mutation,
     ]
 
     def __init__(self, payload):
